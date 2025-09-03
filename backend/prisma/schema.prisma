@@ -1,0 +1,309 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email          String    @unique @db.VarChar(255)
+  name           String    @db.VarChar(200)
+  avatarUrl      String?   @map("avatar_url") @db.Text
+  locale         String?   @default("zh-CN") @db.VarChar(10)
+  timezone       String?   @default("Asia/Shanghai") @db.VarChar(50)
+  preferences    Json?     @default("{}")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz(6)
+
+  // Relations
+  oauthProviders     UserOauthProvider[]
+  mailAccounts       MailAccount[]
+  emails            Email[]
+  userTags          UserTag[]
+  mailRules         MailRule[]
+  notificationConfigs NotificationConfig[]
+  notificationHistory NotificationHistory[]
+  aiConversations   AiConversation[]
+
+  @@map("users")
+}
+
+model UserOauthProvider {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  provider        String    @db.VarChar(50)
+  providerUserId  String    @map("provider_user_id") @db.VarChar(255)
+  accessToken     String?   @map("access_token") @db.Text
+  refreshToken    String?   @map("refresh_token") @db.Text
+  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  scope           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mailAccounts MailAccount[]
+
+  @@unique([provider, providerUserId])
+  @@map("user_oauth_providers")
+}
+
+model MailAccount {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  email           String    @db.VarChar(255)
+  displayName     String?   @map("display_name") @db.VarChar(200)
+  provider        String    @db.VarChar(50)
+  oauthProviderId String?   @map("oauth_provider_id") @db.Uuid
+  
+  // IMAP/SMTP Configuration
+  imapServer      String?   @map("imap_server") @db.VarChar(255)
+  imapPort        Int?      @default(993) @map("imap_port")
+  imapSecurity    String?   @default("SSL") @map("imap_security") @db.VarChar(10)
+  smtpServer      String?   @map("smtp_server") @db.VarChar(255)
+  smtpPort        Int?      @default(587) @map("smtp_port")
+  smtpSecurity    String?   @default("STARTTLS") @map("smtp_security") @db.VarChar(10)
+  
+  // Account Settings
+  syncEnabled     Boolean   @default(true) @map("sync_enabled")
+  syncFrequency   Int       @default(300) @map("sync_frequency")
+  signature       String?   @db.Text
+  autoReplyEnabled Boolean  @default(false) @map("auto_reply_enabled")
+  autoReplyMessage String?  @map("auto_reply_message") @db.Text
+  isPrimary       Boolean   @default(false) @map("is_primary")
+  isActive        Boolean   @default(true) @map("is_active")
+  lastSyncAt      DateTime? @map("last_sync_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  oauthProvider   UserOauthProvider?  @relation(fields: [oauthProviderId], references: [id])
+  mailFolders     MailFolder[]
+  emails          Email[]
+
+  @@map("mail_accounts")
+}
+
+model MailFolder {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  accountId      String    @map("account_id") @db.Uuid
+  name           String    @db.VarChar(100)
+  displayName    String?   @map("display_name") @db.VarChar(200)
+  folderType     String    @default("custom") @map("folder_type") @db.VarChar(50)
+  parentFolderId String?   @map("parent_folder_id") @db.Uuid
+  unreadCount    Int       @default(0) @map("unread_count")
+  totalCount     Int       @default(0) @map("total_count")
+  isSystem       Boolean   @default(false) @map("is_system")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  account       MailAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  parentFolder  MailFolder?  @relation("FolderHierarchy", fields: [parentFolderId], references: [id])
+  subFolders    MailFolder[] @relation("FolderHierarchy")
+  emails        Email[]
+
+  @@unique([accountId, name])
+  @@map("mail_folders")
+}
+
+model Email {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  accountId     String    @map("account_id") @db.Uuid
+  folderId      String?   @map("folder_id") @db.Uuid
+  messageId     String    @map("message_id") @db.VarChar(500)
+  threadId      String?   @map("thread_id") @db.VarChar(255)
+  uid           String?   @db.VarChar(100)
+  
+  // Email Headers
+  subject       String?   @db.Text
+  senderName    String?   @map("sender_name") @db.VarChar(255)
+  senderEmail   String    @map("sender_email") @db.VarChar(255)
+  replyTo       String?   @map("reply_to") @db.VarChar(255)
+  recipients    Json?     @default("[]")
+  cc            Json?     @default("[]")
+  bcc           Json?     @default("[]")
+  
+  // Email Content
+  textContent   String?   @map("text_content") @db.Text
+  htmlContent   String?   @map("html_content") @db.Text
+  previewText   String?   @map("preview_text") @db.Text
+  
+  // Email Properties
+  sizeBytes     Int       @default(0) @map("size_bytes")
+  hasAttachments Boolean  @default(false) @map("has_attachments")
+  isRead        Boolean   @default(false) @map("is_read")
+  isStarred     Boolean   @default(false) @map("is_starred")
+  isImportant   Boolean   @default(false) @map("is_important")
+  isDraft       Boolean   @default(false) @map("is_draft")
+  isSent        Boolean   @default(false) @map("is_sent")
+  isDeleted     Boolean   @default(false) @map("is_deleted")
+  
+  // AI Analysis Results
+  priorityScore Int       @default(0) @map("priority_score")
+  sentiment     String?   @db.VarChar(20)
+  aiSummary     String?   @map("ai_summary") @db.Text
+  aiTags        Json?     @default("[]") @map("ai_tags")
+  
+  // Timestamps
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(6)
+  receivedAt    DateTime? @map("received_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account       MailAccount      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  folder        MailFolder?      @relation(fields: [folderId], references: [id])
+  attachments   EmailAttachment[]
+  aiAnalyses    AiAnalysis[]
+  emailTags     EmailTag[]
+  notifications NotificationHistory[]
+
+  @@map("emails")
+}
+
+model EmailAttachment {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  emailId     String   @map("email_id") @db.Uuid
+  filename    String   @db.VarChar(500)
+  contentType String?  @map("content_type") @db.VarChar(200)
+  sizeBytes   Int      @default(0) @map("size_bytes")
+  contentId   String?  @map("content_id") @db.VarChar(255)
+  isInline    Boolean  @default(false) @map("is_inline")
+  filePath    String?  @map("file_path") @db.Text
+  downloadUrl String?  @map("download_url") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@map("email_attachments")
+}
+
+model AiAnalysis {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  emailId         String   @map("email_id") @db.Uuid
+  analysisType    String   @map("analysis_type") @db.VarChar(50)
+  analysisResult  Json     @map("analysis_result")
+  confidenceScore Decimal? @map("confidence_score") @db.Decimal(4, 3)
+  modelVersion    String?  @map("model_version") @db.VarChar(50)
+  processingTimeMs Int?    @map("processing_time_ms")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analyses")
+}
+
+model UserTag {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  color       String   @default("#3B82F6") @db.VarChar(7)
+  description String?  @db.Text
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailTags EmailTag[]
+
+  @@unique([userId, name])
+  @@map("user_tags")
+}
+
+model EmailTag {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  emailId   String   @map("email_id") @db.Uuid
+  tagId     String   @map("tag_id") @db.Uuid
+  appliedBy String   @default("user") @map("applied_by") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  email Email   @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  tag   UserTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([emailId, tagId])
+  @@map("email_tags")
+}
+
+model MailRule {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  name            String    @db.VarChar(200)
+  description     String?   @db.Text
+  conditions      Json      
+  actions         Json      
+  priority        Int       @default(0)
+  isActive        Boolean   @default(true) @map("is_active")
+  executionCount  Int       @default(0) @map("execution_count")
+  lastExecutedAt  DateTime? @map("last_executed_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("mail_rules")
+}
+
+model NotificationConfig {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  platform  String   @db.VarChar(50)
+  config    Json     
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@map("notification_configs")
+}
+
+model NotificationHistory {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  emailId      String?   @map("email_id") @db.Uuid
+  platform     String    @db.VarChar(50)
+  messageType  String    @map("message_type") @db.VarChar(50)
+  status       String    @default("pending") @db.VarChar(20)
+  errorMessage String?   @map("error_message") @db.Text
+  sentAt       DateTime? @map("sent_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email Email? @relation(fields: [emailId], references: [id], onDelete: SetNull)
+
+  @@map("notification_history")
+}
+
+model AiConversation {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  sessionId    String   @map("session_id") @db.VarChar(100)
+  messageType  String   @map("message_type") @db.VarChar(20)
+  messageText  String   @map("message_text") @db.Text
+  context      Json?    
+  modelVersion String?  @map("model_version") @db.VarChar(50)
+  tokensUsed   Int?     @map("tokens_used")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_conversations")
+}

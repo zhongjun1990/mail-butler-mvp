@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: 
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_AI_SERVICE_URL=http://localhost:8001
+    depends_on:
+      - backend
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+
+  backend:
+    build: 
+      context: ../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://user:password@postgres:5432/mailbutler
+      - AI_SERVICE_URL=http://ai-service:8001
+      - JWT_SECRET=your-secret-key
+      - MAIL_SERVER=smtp.gmail.com
+      - MAIL_PORT=587
+    depends_on:
+      - postgres
+      - redis
+      - ai-service
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+
+  ai-service:
+    build: 
+      context: ../ai-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://user:password@postgres:5432/mailbutler
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ../ai-service:/app
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=mailbutler
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
