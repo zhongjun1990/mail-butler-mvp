@@ -67,3 +67,42 @@ export const authenticateGoogle = passport.authenticate('google', {
 export const authenticateGoogleCallback = passport.authenticate('google', { 
   failureRedirect: '/login?error=oauth_failed' 
 });
+
+// 演示用的简单认证中间件
+export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ 
+      error: 'Unauthorized', 
+      message: '需要提供有效的访问令牌' 
+    });
+  }
+
+  // 演示环境：简单验证
+  const token = authHeader.substring(7);
+  if (token === 'demo-token' || token.length > 10) {
+    // 模拟用户信息
+    req.user = {
+      id: 'demo-user-123',
+      email: 'demo@example.com',
+      name: '演示用户',
+      provider: 'demo',
+      providerId: 'demo-123',
+      createdAt: new Date()
+    };
+    return next();
+  }
+
+  // 实际环境中这里应该验证JWT token
+  const decoded = verifyJWT(token);
+  if (!decoded) {
+    return res.status(401).json({ 
+      error: 'Unauthorized', 
+      message: '令牌无效或已过期' 
+    });
+  }
+
+  req.user = decoded;
+  next();
+};

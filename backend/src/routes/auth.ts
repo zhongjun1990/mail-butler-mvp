@@ -1,84 +1,78 @@
-import express, { Request, Response } from 'express';
-import { 
-  authenticateGoogle, 
-  authenticateGoogleCallback, 
-  authenticateJWT 
-} from '../middleware/auth';
-import { generateJWT, getAllUsers, findUserById } from '../config/passport';
+import { Router } from 'express';
+import { UserService } from '../services/UserService';
 
-const router = express.Router();
+const router = Router();
+const userService = new UserService();
 
-// Google OAuth 登录
-router.get('/google', authenticateGoogle);
-
-// Google OAuth 回调
-router.get('/google/callback', 
-  authenticateGoogleCallback,
-  (req: Request, res: Response) => {
-    // 认证成功，生成JWT令牌
-    if (req.user) {
-      const token = generateJWT(req.user);
-      
-      // 重定向到前端，并传递令牌
-      const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
-      res.redirect(`${frontendURL}/auth/callback?token=${token}`);
-    } else {
-      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed`);
-    }
-  }
-);
-
-// 获取当前用户信息
-router.get('/me', authenticateJWT, (req: Request, res: Response) => {
-  if (req.user) {
-    const user = findUserById(req.user.userId);
-    if (user) {
-      res.json({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        avatar: user.avatar,
-        provider: user.provider,
-        createdAt: user.createdAt
-      });
-    } else {
-      res.status(404).json({ error: 'User not found' });
-    }
-  } else {
-    res.status(401).json({ error: 'Unauthorized' });
-  }
-});
-
-// 登出
-router.post('/logout', authenticateJWT, (req: Request, res: Response) => {
-  // 对于JWT，登出主要在前端处理（删除token）
-  res.json({ message: '登出成功' });
-});
-
-// 验证令牌
-router.get('/verify', authenticateJWT, (req: Request, res: Response) => {
+// Google OAuth 路由
+router.get('/google', (req, res) => {
   res.json({ 
-    valid: true, 
-    user: {
-      id: req.user?.userId,
-      email: req.user?.email,
-      name: req.user?.name
+    message: 'Google OAuth 集成请前往 Google Cloud Console 配置',
+    setup_instructions: {
+      step1: '前往 https://console.cloud.google.com/',
+      step2: '创建 OAuth 2.0 客户端ID',
+      step3: '设置重定向URI: http://localhost:8000/api/auth/google/callback',
+      step4: '将客户端ID和密钥添加到环境变量中'
     }
   });
 });
 
-// 开发环境：获取所有用户
-if (process.env.NODE_ENV === 'development') {
-  router.get('/users', (req: Request, res: Response) => {
-    const users = getAllUsers();
-    res.json(users.map(user => ({
+// 获取当前用户信息
+router.get('/me', async (req, res) => {
+  try {
+    // 模拟检查认证状态
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: '需要认证' });
+    }
+
+    // 创建或获取演示用户
+    let user = await userService.findByEmail('demo@example.com');
+    if (!user) {
+      user = await userService.createOrUpdateOAuthUser({
+        email: 'demo@example.com',
+        name: '演示用户',
+        avatarUrl: 'https://via.placeholder.com/40',
+        provider: 'demo',
+        providerId: 'demo-user-123',
+        preferences: {
+          theme: 'light',
+          language: 'zh-CN',
+          emailsPerPage: 20
+        }
+      });
+    }
+
+    // 获取用户邮件统计
+    const stats = await userService.getUserEmailStats(user.id);
+
+    res.json({
       id: user.id,
       email: user.email,
       name: user.name,
-      provider: user.provider,
-      createdAt: user.createdAt
-    })));
+      avatar: user.avatarUrl,
+      provider: 'demo',
+      preferences: user.preferences,
+      stats
+    });
+  } catch (error) {
+    console.error('获取用户信息失败:', error);
+    res.status(500).json({ error: '内部服务器错误' });
+  }
+});
+
+// 演示登录
+router.post('/demo-login', (req, res) => {
+  // 返回演示token
+  res.json({
+    token: 'demo-token',
+    user: {
+      id: 'demo-user-123',
+      email: 'demo@example.com',
+      name: '演示用户',
+      provider: 'demo'
+    }
   });
-}
+});
 
 export default router;
