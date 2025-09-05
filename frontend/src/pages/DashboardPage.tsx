@@ -20,8 +20,10 @@ import {
   DocumentTextIcon
 } from '@heroicons/react/24/outline';
 import AccountSwitcher from '../components/AccountSwitcher';
+import ComposeEmail from '../components/ComposeEmail';
 import AIDashboardPage from './AIDashboardPage';
 import EmailSettingsPage from './EmailSettingsPage';
+import NotificationSettings from '../components/NotificationSettings';
 
 // 模拟邮件数据
 const allMockEmails = [
@@ -120,8 +122,10 @@ const allMockEmails = [
 const DashboardPage: React.FC = () => {
   const [selectedEmail, setSelectedEmail] = useState(allMockEmails[0]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [currentView, setCurrentView] = useState<'emails' | 'dashboard' | 'settings' | 'reminders'>('emails');
+  const [currentView, setCurrentView] = useState<'emails' | 'dashboard' | 'settings' | 'reminders' | 'notifications'>('emails');
   const [currentFolder, setCurrentFolder] = useState<'inbox' | 'sent' | 'starred' | 'drafts' | 'trash'>('inbox');
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [replyToEmail, setReplyToEmail] = useState<{id: string; subject: string; sender: string} | undefined>();
 
   // 根据当前文件夹过滤邮件
   const getFilteredEmails = () => {
@@ -179,7 +183,7 @@ const DashboardPage: React.FC = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('auth_token');
+    localStorage.removeItem('token');
     window.location.href = '/login';
   };
 
@@ -207,6 +211,33 @@ const DashboardPage: React.FC = () => {
 
         {/* 导航菜单 */}
         <nav className="flex-1 p-4 space-y-2">
+          {/* 撰写邮件按钮 */}
+          {!sidebarCollapsed && (
+            <button
+              onClick={() => {
+                setReplyToEmail(undefined);
+                setIsComposeOpen(true);
+              }}
+              className="w-full flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mb-4"
+            >
+              <PencilIcon className="h-5 w-5 mr-2" />
+              撰写邮件
+            </button>
+          )}
+          
+          {sidebarCollapsed && (
+            <button
+              onClick={() => {
+                setReplyToEmail(undefined);
+                setIsComposeOpen(true);
+              }}
+              className="w-full flex items-center justify-center p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mb-4"
+              title="撰写邮件"
+            >
+              <PencilIcon className="h-5 w-5" />
+            </button>
+          )}
+
           <NavItem 
             icon={InboxIcon} 
             label="收件箱" 
@@ -285,6 +316,13 @@ const DashboardPage: React.FC = () => {
                 collapsed={false}
                 active={currentView === 'settings'}
                 onClick={() => setCurrentView('settings')}
+              />
+              <NavItem 
+                icon={BellIcon} 
+                label="通知设置" 
+                collapsed={false}
+                active={currentView === 'notifications'}
+                onClick={() => setCurrentView('notifications')}
               />
             </>
           )}
@@ -366,7 +404,16 @@ const DashboardPage: React.FC = () => {
 
             {/* 邮件内容 */}
             <div className="flex-1 flex flex-col">
-              {selectedEmail && <EmailContent email={selectedEmail} folderType={currentFolder} />}
+              {selectedEmail && (
+                <EmailContent 
+                  email={selectedEmail} 
+                  folderType={currentFolder}
+                  onReply={(emailInfo) => {
+                    setReplyToEmail(emailInfo);
+                    setIsComposeOpen(true);
+                  }}
+                />
+              )}
             </div>
           </>
         ) : (
@@ -374,9 +421,20 @@ const DashboardPage: React.FC = () => {
             {currentView === 'dashboard' && <AIDashboardPage />}
             {currentView === 'settings' && <EmailSettingsPage />}
             {currentView === 'reminders' && <SmartRemindersPage />}
+            {currentView === 'notifications' && <NotificationSettings />}
           </div>
         )}
       </div>
+  
+      {/* 邮件撰写弹窗 */}
+      <ComposeEmail 
+        isOpen={isComposeOpen}
+        onClose={() => {
+          setIsComposeOpen(false);
+          setReplyToEmail(undefined);
+        }}
+        replyTo={replyToEmail}
+      />
     </div>
   );
 };
@@ -488,7 +546,11 @@ const EmailItem: React.FC<{
 };
 
 // 邮件内容组件
-const EmailContent: React.FC<{ email: any; folderType: string }> = ({ email, folderType }) => {
+const EmailContent: React.FC<{ 
+  email: any; 
+  folderType: string;
+  onReply?: (email: {id: string; subject: string; sender: string}) => void;
+}> = ({ email, folderType, onReply }) => {
   const getEmailHeader = () => {
     if (folderType === 'sent' || folderType === 'drafts') {
       return {
@@ -541,6 +603,19 @@ const EmailContent: React.FC<{ email: any; folderType: string }> = ({ email, fol
               </>
             ) : (
               <>
+                {folderType === 'inbox' && onReply && (
+                  <button 
+                    onClick={() => onReply({
+                      id: email.id,
+                      subject: email.subject,
+                      sender: email.sender
+                    })}
+                    className="p-2 text-gray-400 hover:text-blue-500" 
+                    title="回复"
+                  >
+                    <PaperAirplaneIcon className="h-5 w-5" />
+                  </button>
+                )}
                 <button className="p-2 text-gray-400 hover:text-yellow-500" title="标记星标">
                   <StarIcon className={`h-5 w-5 ${email.isStarred ? 'text-yellow-400 fill-current' : ''}`} />
                 </button>
@@ -579,6 +654,31 @@ const EmailContent: React.FC<{ email: any; folderType: string }> = ({ email, fol
         </div>
       </div>
 
+      {/* 回复操作栏 - 只在收件箱显示 */}
+      {folderType === 'inbox' && onReply && (
+        <div className="p-4 bg-gray-50 border-t border-gray-200">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => onReply({
+                id: email.id,
+                subject: email.subject,
+                sender: email.sender
+              })}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              <PaperAirplaneIcon className="h-4 w-4 inline mr-2" />
+              回复
+            </button>
+            <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
+              转发
+            </button>
+            <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
+              全部回复
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* AI 助手建议 - 只在非草稿和非垃圾箱显示 */}
       {folderType !== 'drafts' && folderType !== 'trash' && (
         <div className="p-4 bg-blue-50 border-t border-blue-200">
@@ -596,10 +696,24 @@ const EmailContent: React.FC<{ email: any; folderType: string }> = ({ email, fol
               </p>
               {folderType !== 'sent' && (
                 <div className="mt-2 space-x-2">
-                  <button className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                  <button 
+                    onClick={() => onReply && onReply({
+                      id: email.id,
+                      subject: email.subject,
+                      sender: email.sender
+                    })}
+                    className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                  >
                     感谢确认
                   </button>
-                  <button className="px-3 py-1 bg-white text-blue-500 text-xs rounded border border-blue-300 hover:bg-blue-50">
+                  <button 
+                    onClick={() => onReply && onReply({
+                      id: email.id,
+                      subject: email.subject,
+                      sender: email.sender
+                    })}
+                    className="px-3 py-1 bg-white text-blue-500 text-xs rounded border border-blue-300 hover:bg-blue-50"
+                  >
                     需要更多信息
                   </button>
                 </div>

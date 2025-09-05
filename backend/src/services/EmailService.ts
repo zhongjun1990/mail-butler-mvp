@@ -1,8 +1,19 @@
-import * as Imap from 'imap';
+import Imap from 'imap';
 import { simpleParser } from 'mailparser';
+import * as nodemailer from 'nodemailer';
 import prisma from '../config/database';
+import { AIService } from './AIService';
+import { NotificationService } from './NotificationService';
 
 interface IMAPConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  password: string;
+}
+
+interface SMTPConfig {
   host: string;
   port: number;
   secure: boolean;
@@ -16,6 +27,7 @@ interface EmailAccount {
   email: string;
   provider: string;
   imapConfig: IMAPConfig;
+  smtpConfig?: SMTPConfig;
   userId: string;
 }
 
@@ -26,9 +38,80 @@ interface EmailFilter {
   limit?: number;
   search?: string;
   unreadOnly?: boolean;
+  dateFrom?: Date;
+  dateTo?: Date;
+  hasAttachments?: boolean;
 }
 
+interface SendEmailRequest {
+  to: string | string[];
+  cc?: string | string[];
+  bcc?: string | string[];
+  subject: string;
+  text?: string;
+  html?: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer | string;
+    contentType?: string;
+  }>;
+}
+
+// 邮箱提供商配置
+const EMAIL_PROVIDERS = {
+  gmail: {
+    imap: { host: 'imap.gmail.com', port: 993, secure: true },
+    smtp: { host: 'smtp.gmail.com', port: 587, secure: false }
+  },
+  outlook: {
+    imap: { host: 'outlook.office365.com', port: 993, secure: true },
+    smtp: { host: 'smtp.office365.com', port: 587, secure: false }
+  },
+  yahoo: {
+    imap: { host: 'imap.mail.yahoo.com', port: 993, secure: true },
+    smtp: { host: 'smtp.mail.yahoo.com', port: 587, secure: false }
+  },
+  '163': {
+    imap: { host: 'imap.163.com', port: 993, secure: true },
+    smtp: { host: 'smtp.163.com', port: 465, secure: true }
+  },
+  'qq': {
+    imap: { host: 'imap.qq.com', port: 993, secure: true },
+    smtp: { host: 'smtp.qq.com', port: 587, secure: false }
+  }
+} as const;
+
 export class EmailService {
+  private aiService: AIService;
+  private notificationService: NotificationService;
+
+  constructor() {
+    this.aiService = new AIService();
+    this.notificationService = new NotificationService(prisma);
+  }
+
+  // 获取邮箱提供商配置
+  static getProviderConfig(provider: string) {
+    const providerConfig = EMAIL_PROVIDERS[provider as keyof typeof EMAIL_PROVIDERS];
+    if (!providerConfig) {
+      throw new Error(`不支持的邮箱提供商: ${provider}`);
+    }
+    return providerConfig;
+  }
+
+  // 智能检测邮箱提供商
+  static detectProvider(email: string): string {
+    const domain = email.split('@')[1]?.toLowerCase();
+    
+    if (domain.includes('gmail')) return 'gmail';
+    if (domain.includes('outlook') || domain.includes('hotmail') || domain.includes('live')) return 'outlook';
+    if (domain.includes('yahoo')) return 'yahoo';
+    if (domain.includes('163')) return '163';
+    if (domain.includes('qq')) return 'qq';
+    
+    // 默认返回需要手动配置
+    return 'custom';
+  }
   
   // 获取用户所有邮箱账户
   async getUserAccounts(userId: string) {
@@ -66,25 +149,86 @@ export class EmailService {
   }
 
   // 添加新的邮箱账户
-  async addAccount(userId: string, accountData: Omit<EmailAccount, 'userId'>) {
+  async addAccount(userId: string, accountData: {
+    name: string;
+    email: string;
+    password: string;
+    provider?: string;
+    customImap?: Partial<IMAPConfig>;
+    customSmtp?: Partial<SMTPConfig>;
+  }) {
     try {
-      // 首先测试连接
-      const testResult = await this.testIMAPConnection(accountData.imapConfig);
-      if (!testResult.success) {
-        throw new Error(`IMAP连接失败: ${testResult.error}`);
+      // 自动检测提供商
+      let provider = accountData.provider || EmailService.detectProvider(accountData.email);
+      
+      let imapConfig: IMAPConfig;
+      let smtpConfig: SMTPConfig;
+      
+      if (provider === 'custom') {
+        // 手动配置
+        if (!accountData.customImap || !accountData.customSmtp) {
+          throw new Error('自定义邮箱需要提供IMAP和SMTP配置');
+        }
+        imapConfig = {
+          host: accountData.customImap.host!,
+          port: accountData.customImap.port!,
+          secure: accountData.customImap.secure!,
+          username: accountData.email,
+          password: accountData.password
+        };
+        smtpConfig = {
+          host: accountData.customSmtp.host!,
+          port: accountData.customSmtp.port!,
+          secure: accountData.customSmtp.secure!,
+          username: accountData.email,
+          password: accountData.password
+        };
+      } else {
+        // 使用预设配置
+        const providerConfig = EmailService.getProviderConfig(provider);
+        imapConfig = {
+          ...providerConfig.imap,
+          username: accountData.email,
+          password: accountData.password
+        };
+        smtpConfig = {
+          ...providerConfig.smtp,
+          username: accountData.email,
+          password: accountData.password
+        };
       }
 
-      // 加密存储IMAP配置（实际项目中应该使用加密）
+      // 测试IMAP连接
+      const imapTest = await this.testIMAPConnection(imapConfig);
+      if (!imapTest.success) {
+        throw new Error(`IMAP连接失败: ${imapTest.error}`);
+      }
+
+      // 测试SMTP连接
+      const smtpTest = await this.testSMTPConnection(smtpConfig);
+      if (!smtpTest.success) {
+        console.warn(`SMTP连接测试失败: ${smtpTest.error}`);
+        // SMTP失败不阻止账户创建，只是警告
+      }
+
+      // 加密存储配置（实际项目中应该使用加密）
       const account = await prisma.emailAccount.create({
         data: {
           name: accountData.name,
           email: accountData.email,
-          provider: accountData.provider,
-          imapHost: accountData.imapConfig.host,
-          imapPort: accountData.imapConfig.port,
-          imapSecure: accountData.imapConfig.secure,
-          imapUsername: accountData.imapConfig.username,
-          imapPassword: accountData.imapConfig.password, // 实际应用中需要加密
+          provider: provider,
+          // IMAP配置
+          imapHost: imapConfig.host,
+          imapPort: imapConfig.port,
+          imapSecure: imapConfig.secure,
+          imapUsername: imapConfig.username,
+          imapPassword: imapConfig.password, // 实际应用中需要加密
+          // SMTP配置
+          smtpHost: smtpConfig.host,
+          smtpPort: smtpConfig.port,
+          smtpSecure: smtpConfig.secure,
+          smtpUsername: smtpConfig.username,
+          smtpPassword: smtpConfig.password, // 实际应用中需要加密
           status: 'connected',
           userId: userId
         },
@@ -99,7 +243,7 @@ export class EmailService {
       });
 
       // 异步启动首次同步
-      this.syncAccount(userId, account.id).catch(error => 
+      this.syncAccount(userId, account.id, true).catch(error => 
         console.error('首次同步失败:', error)
       );
 
@@ -157,7 +301,7 @@ export class EmailService {
         resolve({ success: true });
       });
 
-      imap.once('error', (err) => {
+      imap.once('error', (err: any) => {
         clearTimeout(timeout);
         resolve({ success: false, error: err.message });
       });
@@ -171,8 +315,101 @@ export class EmailService {
     });
   }
 
+  // 测试SMTP连接
+  async testSMTPConnection(config: SMTPConfig): Promise<{ success: boolean; error?: string }> {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        auth: {
+          user: config.username,
+          pass: config.password
+        },
+        tls: {
+          rejectUnauthorized: false
+        }
+      });
+
+      await transporter.verify();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 发送邮件
+  async sendEmail(userId: string, accountId: string, emailData: SendEmailRequest) {
+    try {
+      const account = await prisma.emailAccount.findFirst({
+        where: { id: accountId, userId }
+      });
+
+      if (!account) {
+        throw new Error('邮箱账户不存在');
+      }
+
+      const smtpConfig = {
+        host: account.smtpHost,
+        port: account.smtpPort,
+        secure: account.smtpSecure,
+        username: account.smtpUsername,
+        password: account.smtpPassword
+      };
+
+      const transporter = nodemailer.createTransport({
+        host: smtpConfig.host!,
+        port: smtpConfig.port!,
+        secure: smtpConfig.secure,
+        auth: {
+          user: smtpConfig.username!,
+          pass: smtpConfig.password!
+        }
+      } as any);
+
+      const mailOptions = {
+        from: `"${account.name}" <${account.email}>`,
+        to: Array.isArray(emailData.to) ? emailData.to.join(', ') : emailData.to,
+        cc: emailData.cc ? (Array.isArray(emailData.cc) ? emailData.cc.join(', ') : emailData.cc) : undefined,
+        bcc: emailData.bcc ? (Array.isArray(emailData.bcc) ? emailData.bcc.join(', ') : emailData.bcc) : undefined,
+        subject: emailData.subject,
+        text: emailData.text,
+        html: emailData.html,
+        attachments: emailData.attachments
+      };
+
+      const result = await transporter.sendMail(mailOptions);
+
+      // 保存已发送邮件记录
+      await prisma.email.create({
+        data: {
+          uid: Date.now(), // 使用时间戳作为 UID
+          accountId: accountId,
+          subject: emailData.subject,
+          sender: account.email,
+          recipient: Array.isArray(emailData.to) ? emailData.to.join(', ') : emailData.to,
+          content: emailData.text || emailData.html || '',
+          date: new Date(),
+          isRead: true,
+          isSent: true,
+          folder: 'Sent',
+          messageId: result.messageId
+        }
+      });
+
+      return {
+        success: true,
+        messageId: result.messageId,
+        response: result.response
+      };
+    } catch (error) {
+      console.error('发送邮件失败:', error);
+      throw error;
+    }
+  }
+
   // 同步邮箱
-  async syncAccount(userId: string, accountId: string) {
+  async syncAccount(userId: string, accountId: string, enableAI: boolean = false) {
     try {
       // 更新同步状态
       await prisma.emailAccount.update({
@@ -199,7 +436,7 @@ export class EmailService {
         password: account.imapPassword
       };
 
-      await this.syncIMAPEmails(accountId, imapConfig);
+      await this.syncIMAPEmails(accountId, imapConfig, enableAI);
 
       // 更新同步状态
       await prisma.emailAccount.update({
@@ -210,6 +447,7 @@ export class EmailService {
         }
       });
 
+      return { success: true };
     } catch (error) {
       console.error('同步邮箱失败:', error);
       
@@ -224,7 +462,7 @@ export class EmailService {
   }
 
   // 同步IMAP邮件
-  private async syncIMAPEmails(accountId: string, config: IMAPConfig) {
+  private async syncIMAPEmails(accountId: string, config: IMAPConfig, enableAI: boolean = false) {
     return new Promise<void>((resolve, reject) => {
       const imap = new Imap({
         host: config.host,
@@ -244,16 +482,17 @@ export class EmailService {
             return;
           }
 
-          // 获取最近100封邮件
+          // 获取最近100封邮件（包含完整内容）
           const fetch = imap.seq.fetch(`${Math.max(1, box.messages.total - 99)}:*`, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
+            bodies: '', // 获取完整邮件内容
             struct: true
           });
 
-          const emails = [];
+          const emails: any[] = [];
 
           fetch.on('message', (msg, seqno) => {
-            let header;
+            let header: any;
+            let content = '';
             
             msg.on('body', (stream, info) => {
               let buffer = '';
@@ -261,7 +500,12 @@ export class EmailService {
                 buffer += chunk.toString('ascii');
               });
               stream.once('end', () => {
-                header = Imap.parseHeader(buffer);
+                if (info.which === 'HEADER') {
+                  header = Imap.parseHeader(buffer);
+                } else {
+                  // 处理邮件正文内容
+                  content = buffer;
+                }
               });
             });
 
@@ -270,7 +514,8 @@ export class EmailService {
                 uid: attrs.uid,
                 flags: attrs.flags,
                 date: attrs.date,
-                header: header
+                header: header,
+                content: content
               });
             });
           });
@@ -285,7 +530,7 @@ export class EmailService {
             try {
               // 保存邮件到数据库
               for (const email of emails) {
-                await this.saveEmail(accountId, email);
+                await this.saveEmail(accountId, email, enableAI);
               }
               resolve();
             } catch (error) {
@@ -295,7 +540,7 @@ export class EmailService {
         });
       });
 
-      imap.once('error', (err) => {
+      imap.once('error', (err: any) => {
         reject(err);
       });
 
@@ -304,7 +549,7 @@ export class EmailService {
   }
 
   // 保存邮件到数据库
-  private async saveEmail(accountId: string, emailData: any) {
+  private async saveEmail(accountId: string, emailData: any, enableAI: boolean = false) {
     try {
       const existingEmail = await prisma.email.findFirst({
         where: {
@@ -318,21 +563,74 @@ export class EmailService {
       }
 
       const header = emailData.header;
-      await prisma.email.create({
+      const subject = header.subject ? header.subject[0] : '';
+      const sender = header.from ? header.from[0] : '';
+      const recipient = header.to ? header.to[0] : '';
+      const content = emailData.content || ''; // 邮件正文内容
+
+      // 创建邮件记录
+      const emailRecord = await prisma.email.create({
         data: {
           uid: emailData.uid,
           accountId: accountId,
-          subject: header.subject ? header.subject[0] : '',
-          sender: header.from ? header.from[0] : '',
-          recipient: header.to ? header.to[0] : '',
+          subject: subject,
+          sender: sender,
+          recipient: recipient,
+          textContent: content, // 使用正确的字段名
           date: emailData.date,
           isRead: !emailData.flags.includes('\\Seen'),
           flags: emailData.flags.join(','),
           folder: 'INBOX'
         }
       });
+
+      // 如果启用AI分析，异步进行分析
+      if (enableAI && this.aiService && subject && content) {
+        try {
+          // 调用AI服务进行邮件分析
+          const analysisResult = await this.aiService.analyzeEmail({
+            email_id: emailRecord.id,
+            subject: subject,
+            content: content,
+            sender: sender
+          });
+
+          // 更新邮件记录的AI分析结果
+          await prisma.email.update({
+            where: { id: emailRecord.id },
+            data: {
+              aiAnalysis: {
+                summary: analysisResult.summary,
+                priority: analysisResult.priority,
+                sentiment: analysisResult.sentiment,
+                tags: analysisResult.tags,
+                keyPoints: analysisResult.key_points,
+                actionRequired: analysisResult.action_required,
+                confidence: analysisResult.confidence,
+                analyzedAt: new Date().toISOString()
+              },
+              // 同时更新一些简化字段方便查询
+              category: analysisResult.tags[0] || '其他',
+              priority: analysisResult.priority
+            }
+          });
+
+          // 发送通知
+          await this.sendEmailNotifications(accountId, emailRecord, analysisResult);
+        } catch (aiError) {
+          console.error('AI分析失败，但邮件已保存:', aiError);
+          // AI分析失败不影响邮件保存，但仍发送新邮件通知
+          await this.sendEmailNotifications(accountId, emailRecord);
+        }
+      } else {
+        // 没有AI分析的情况下也发送新邮件通知
+        await this.sendEmailNotifications(accountId, emailRecord);
+      }
+
+      return emailRecord;
     } catch (error) {
       console.error('保存邮件失败:', error);
+      throw error;
     }
   }
 
@@ -518,6 +816,45 @@ export class EmailService {
     } catch (error) {
       console.error('获取邮件统计失败:', error);
       throw error;
+    }
+  }
+
+  // 发送邮件通知
+  private async sendEmailNotifications(accountId: string, email: any, aiAnalysis?: any) {
+    try {
+      // 获取邮箱账户和用户信息
+      const account = await prisma.emailAccount.findUnique({
+        where: { id: accountId },
+        include: { user: true }
+      });
+
+      if (!account) {
+        console.error('未找到邮箱账户:', accountId);
+        return;
+      }
+
+      const userId = account.userId;
+
+      // 发送新邮件通知
+      await this.notificationService.notifyNewEmail(userId, {
+        id: email.id,
+        subject: email.subject,
+        sender: email.sender,
+        priority: email.priority || 'medium'
+      });
+
+      // 如果有AI分析结果且是重要邮件，发送重要邮件通知
+      if (aiAnalysis && aiAnalysis.priority === 'high') {
+        await this.notificationService.notifyImportantEmail(userId, {
+          id: email.id,
+          subject: email.subject,
+          sender: email.sender,
+          priority: 'high'
+        }, aiAnalysis);
+      }
+    } catch (error) {
+      console.error('发送邮件通知失败:', error);
+      // 通知发送失败不影响主流程
     }
   }
 }

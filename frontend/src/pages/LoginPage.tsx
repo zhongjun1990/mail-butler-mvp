@@ -8,8 +8,14 @@ const LoginPage: React.FC = () => {
 
   const handleDemoLogin = () => {
     // 演示登录，直接生成一个模拟 token
-    const demoToken = 'demo-token-' + Date.now();
-    localStorage.setItem('auth_token', demoToken);
+    const demoToken = 'demo-token';
+    localStorage.setItem('token', demoToken);
+    localStorage.setItem('user', JSON.stringify({
+      id: 'demo-user-123',
+      email: 'demo@example.com',
+      name: '演示用户',
+      provider: 'demo'
+    }));
     window.location.href = '/dashboard';
   };
 

@@ -73,7 +73,7 @@ const EmailSettingsPage: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
           host: newAccount.imapHost,
@@ -109,7 +109,7 @@ const EmailSettingsPage: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
           name: newAccount.name,
@@ -159,7 +159,7 @@ const EmailSettingsPage: React.FC = () => {
       const response = await fetch(`/api/emails/accounts/${accountId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
 
@@ -178,7 +178,7 @@ const EmailSettingsPage: React.FC = () => {
       const response = await fetch(`/api/emails/accounts/${accountId}/sync`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
 

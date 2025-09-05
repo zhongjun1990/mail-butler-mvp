@@ -234,6 +234,129 @@ app.get('/api/ai/dashboard', authMiddleware, (req, res) => {
   });
 });
 
+// 通知设置 API
+app.get('/api/notifications/options', authMiddleware, (req, res) => {
+  res.json({
+    platforms: [
+      { value: 'dingtalk', label: '钉钉', description: '通过钉钉机器人发送消息通知' },
+      { value: 'feishu', label: '飞书', description: '通过飞书机器人发送消息通知' },
+      { value: 'wechat', label: '微信企业号', description: '通过微信企业号应用发送消息通知' }
+    ],
+    types: [
+      { value: 'new_email', label: '新邮件通知', description: '收到新邮件时发送通知' },
+      { value: 'important_email', label: '重要邮件通知', description: 'AI检测到重要邮件时发送通知' },
+      { value: 'ai_summary', label: 'AI摘要通知', description: 'AI生成邮件摘要时发送通知' },
+      { value: 'daily_digest', label: '每日摘要', description: '发送每日邮件摘要' },
+      { value: 'custom', label: '自定义通知', description: '自定义触发的通知' }
+    ]
+  });
+});
+
+app.get('/api/notifications/configs', authMiddleware, (req, res) => {
+  res.json([
+    {
+      id: 'config-1',
+      platform: 'dingtalk',
+      webhook: 'https://oapi.dingtalk.com/robot/send?access_token=***',
+      enabled: true,
+      types: ['new_email', 'important_email'],
+      filters: {
+        keywords: ['重要', '紧急'],
+        minPriority: 'medium',
+        timeRange: { start: '09:00', end: '18:00' }
+      },
+      createdAt: new Date().toISOString()
+    }
+  ]);
+});
+
+app.post('/api/notifications/configs', authMiddleware, (req, res) => {
+  const { platform, webhook, enabled, types, filters } = req.body;
+  
+  // 模拟添加通知配置
+  const config = {
+    id: 'config-' + Date.now(),
+    platform,
+    webhook: webhook.substring(0, 50) + '***', // 隐藏敏感信息
+    enabled,
+    types,
+    filters,
+    createdAt: new Date().toISOString()
+  };
+  
+  res.status(201).json({ success: true, message: '通知配置添加成功' });
+});
+
+app.post('/api/notifications/test-config', authMiddleware, (req, res) => {
+  const { platform, webhook } = req.body;
+  
+  // 模拟测试通知配置
+  setTimeout(() => {
+    if (webhook && webhook.startsWith('https://')) {
+      res.json({ success: true, message: '通知测试成功' });
+    } else {
+      res.status(400).json({ error: 'Webhook配置无效' });
+    }
+  }, 800);
+});
+
+app.post('/api/notifications/send-test', authMiddleware, (req, res) => {
+  const { title, content } = req.body;
+  
+  // 模拟发送测试通知
+  setTimeout(() => {
+    res.json({ success: true, message: '测试通知发送成功' });
+  }, 1000);
+});
+
+app.get('/api/notifications/stats', authMiddleware, (req, res) => {
+  res.json({
+    total: 156,
+    successful: 142,
+    failureRate: '8.97',
+    activeConfigs: 2,
+    platformStats: [
+      { platform: 'dingtalk', total: 89, successful: 85 },
+      { platform: 'feishu', total: 67, successful: 57 }
+    ],
+    typeStats: [
+      { type: 'new_email', count: 98 },
+      { type: 'important_email', count: 34 },
+      { type: 'ai_summary', count: 24 }
+    ],
+    recentHistory: [
+      { platform: 'dingtalk', type: 'new_email', success: true, sentAt: new Date().toISOString() }
+    ]
+  });
+});
+
+app.get('/api/notifications/history', authMiddleware, (req, res) => {
+  const { page = 1, limit = 20 } = req.query;
+  
+  const mockHistory = [
+    {
+      id: 'history-1',
+      platform: 'dingtalk',
+      type: 'new_email',
+      title: '新邮件通知',
+      content: '您收到一封来自 manager@company.com 的新邮件',
+      success: true,
+      sentAt: new Date().toISOString(),
+      config: { platform: 'dingtalk', webhook: 'https://***' }
+    }
+  ];
+  
+  res.json({
+    history: mockHistory,
+    pagination: {
+      page: parseInt(page as string),
+      limit: parseInt(limit as string),
+      total: 1,
+      pages: 1
+    }
+  });
+});
+
 // 错误处理
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

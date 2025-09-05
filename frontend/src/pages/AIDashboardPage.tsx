@@ -120,7 +120,7 @@ const AIDashboardPage: React.FC = () => {
     try {
       const response = await fetch(`/api/ai/dashboard?range=${timeRange}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
       

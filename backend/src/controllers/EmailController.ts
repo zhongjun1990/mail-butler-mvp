@@ -48,13 +48,12 @@ export class EmailController {
       const account = await this.emailService.addAccount(userId, {
         name,
         email,
+        password,
         provider,
-        imapConfig: {
+        customImap: {
           host,
           port: parseInt(port),
-          secure: Boolean(secure),
-          username,
-          password
+          secure: Boolean(secure)
         }
       });
 
@@ -204,6 +203,52 @@ export class EmailController {
     } catch (error) {
       console.error('标记邮件状态失败:', error);
       res.status(500).json({ error: '标记邮件状态失败' });
+    }
+  }
+
+  // 发送邮件
+  async sendEmail(req: Request, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: '用户未认证' });
+      }
+
+      const { accountId, to, cc, bcc, subject, text, html, attachments } = req.body;
+
+      // 验证必需字段
+      if (!accountId || !to || !subject) {
+        return res.status(400).json({ error: '缺少必需字段：accountId, to, subject' });
+      }
+
+      // 验证邮件内容
+      if (!text && !html) {
+        return res.status(400).json({ error: '邮件必须包含文本或HTML内容' });
+      }
+
+      const result = await this.emailService.sendEmail(userId, accountId, {
+        to,
+        cc,
+        bcc,
+        subject,
+        text,
+        html,
+        attachments
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error('发送邮件失败:', error);
+      
+      if (error.message && error.message.includes('账户不存在')) {
+        return res.status(404).json({ error: '邮箱账户不存在' });
+      }
+      
+      if (error.message && error.message.includes('SMTP')) {
+        return res.status(400).json({ error: '邮件发送失败，请检查SMTP配置' });
+      }
+      
+      res.status(500).json({ error: '发送邮件失败' });
     }
   }
 }

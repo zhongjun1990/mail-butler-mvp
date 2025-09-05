@@ -7,7 +7,7 @@ import './App.css'
 
 // 简单的认证检查
 const isAuthenticated = () => {
-  return localStorage.getItem('auth_token') !== null;
+  return localStorage.getItem('token') !== null;
 };
 
 // 受保护的路由组件

@@ -17,8 +17,8 @@ model User {
   avatarUrl  String?
   
   // OAuth 信息
-  provider   String
-  providerId String
+  provider   String @default("oauth")
+  providerId String @default("")
   
   // 用户偏好设置
   preferences Json?
@@ -34,6 +34,12 @@ model User {
   
   // 邮件规则
   emailRules    EmailRule[]
+  
+  // 通知配置
+  notificationConfigs NotificationConfig[]
+  
+  // 通知历史
+  notificationHistory NotificationHistory[]
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -54,6 +60,13 @@ model EmailAccount {
   imapSecure   Boolean @default(true)
   imapUsername String
   imapPassword String // 实际应用中应加密存储
+  
+  // SMTP 配置
+  smtpHost     String?
+  smtpPort     Int?
+  smtpSecure   Boolean @default(true)
+  smtpUsername String?
+  smtpPassword String? // 实际应用中应加密存储
   
   // 同步信息
   lastSync DateTime?
@@ -88,6 +101,7 @@ model Email {
   flags      String? // IMAP flags as comma-separated string
   
   // 内容
+  content     String? // 邮件正文内容
   textContent String?
   htmlContent String?
   attachments Json? // 附件信息
@@ -95,13 +109,22 @@ model Email {
   // 分类和标签
   category String?
   priority String? // high, medium, low
-  tags     Json? // 标签数组
+  tags     String? // 标签字符串，逗号分隔
   
   // 文件夹信息
   folder String @default("INBOX")
   
   // AI 分析结果
-  aiAnalysis Json?
+  summary        String? // AI 生成的邮件摘要
+  sentiment      String? // 情感分析: positive, neutral, negative
+  keyPoints      String? // 关键要点，逗号分隔
+  actionRequired Boolean @default(false) // 是否需要采取行动
+  confidence     Float?  // AI 分析的置信度
+  aiAnalysis     Json?   // 完整的 AI 分析结果
+  
+  // 发送状态
+  isSent    Boolean @default(false) // 是否为已发送邮件
+  messageId String? // 邮件消息 ID
   
   // 关联邮箱账户
   accountId String
@@ -199,4 +222,53 @@ model EmailRule {
   
   @@index([userId, isActive])
   @@map("email_rules")
+}
+
+model NotificationConfig {
+  id String @id @default(uuid())
+  
+  // 配置信息
+  platform String // dingtalk, feishu, wechat
+  webhook  String // Webhook URL
+  enabled  Boolean @default(true)
+  types    String[] // 通知类型数组
+  filters  Json? // 过滤条件
+  
+  // 关联用户
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 通知历史
+  notifications NotificationHistory[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([userId, enabled])
+  @@map("notification_configs")
+}
+
+model NotificationHistory {
+  id String @id @default(uuid())
+  
+  // 通知信息
+  platform String // dingtalk, feishu, wechat
+  type     String // new_email, important_email, ai_summary等
+  title    String
+  content  String
+  success  Boolean @default(false)
+  metadata Json? // 额外的元数据
+  sentAt   DateTime
+  
+  // 关联用户和配置
+  userId   String
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  configId String
+  config   NotificationConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@index([userId, sentAt])
+  @@index([configId])
+  @@map("notification_history")
 }

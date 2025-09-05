@@ -20,6 +20,7 @@ router.post('/emails/:emailId/reply-suggestions', aiController.generateReply.bin
 // 智能功能
 router.post('/search', aiController.smartSearch.bind(aiController));
 router.post('/reminders', aiController.setSmartReminder.bind(aiController));
+router.post('/chat', aiController.chatWithAI.bind(aiController));
 
 // 报告导出
 router.get('/reports/export', aiController.exportReport.bind(aiController));

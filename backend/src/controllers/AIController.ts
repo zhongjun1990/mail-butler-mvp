@@ -190,4 +190,26 @@ export class AIController {
       res.status(500).json({ error: '导出报告失败' });
     }
   }
+
+  // AI 智能聊天
+  async chatWithAI(req: Request, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const { message, context } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: '用户未认证' });
+      }
+
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: '消息内容不能为空' });
+      }
+
+      const chatResponse = await this.aiService.chatWithAI(userId, message, context);
+      res.json(chatResponse);
+    } catch (error) {
+      console.error('AI聊天失败:', error);
+      res.status(500).json({ error: 'AI聊天失败' });
+    }
+  }
 }

@@ -22,4 +22,7 @@ router.get('/', emailController.getEmails.bind(emailController));
 router.get('/:id', emailController.getEmailDetail.bind(emailController));
 router.patch('/:id/read', emailController.markEmailRead.bind(emailController));
 
+// 发送邮件
+router.post('/send', emailController.sendEmail.bind(emailController));
+
 export default router;

@@ -11,7 +11,7 @@ const AuthCallbackPage: React.FC = () => {
     
     if (token) {
       // 保存token到localStorage
-      localStorage.setItem('auth_token', token);
+      localStorage.setItem('token', token);
       // 重定向到主页面
       navigate('/dashboard');
     } else {

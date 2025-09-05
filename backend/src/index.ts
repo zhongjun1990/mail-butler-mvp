@@ -8,6 +8,7 @@ import { UserService } from './services/UserService';
 import authRoutes from './routes/auth';
 import emailRoutes from './routes/emails';
 import aiRoutes from './routes/ai';
+import notificationRoutes from './routes/notifications';
 
 // 加载环境变量
 dotenv.config();
@@ -46,6 +47,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/emails', emailRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 错误处理
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
